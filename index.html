@@ -71,6 +71,9 @@
       <dt>Wind speed</dt><dd id="wx-speed">-</dd>
       <dt>Wind direction</dt><dd id="wx-dir">-</dd>
       <dt>Pressure</dt><dd id="wx-press">-</dd>
+      <dt>Wind gusts</dt><dd id="wx-gust">-</dd>
+      <dt>Humidity</dt><dd id="wx-hum">-</dd>
+      <dt>Dew point</dt><dd id="wx-dew">-</dd>
       <dt>Position</dt><dd id="wx-pos">-</dd>
       <dt>Updated</dt><dd id="wx-time">-</dd>
     </dl>
@@ -239,6 +242,9 @@ function toSignalK(c) {
     windSpeed: c.wind_speed_10m,
     windDirection: c.wind_direction_10m * Math.PI / 180,
     pressure: c.pressure_msl * 100,
+    windGust: c.wind_gusts_10m,
+    humidity: c.relative_humidity_2m / 100,
+    dewPoint: c.dew_point_2m + 273.15,
     time: new Date()
   };
 }
@@ -252,6 +258,9 @@ function renderWeather() {
   $('wx-speed').textContent = `${latest.windSpeed.toFixed(1)} m/s  (${(latest.windSpeed * 1.94384).toFixed(1)} kn)`;
   $('wx-dir').textContent = `${(latest.windDirection * 180 / Math.PI).toFixed(0)}°  (${latest.windDirection.toFixed(3)} rad)`;
   $('wx-press').textContent = `${(latest.pressure / 100).toFixed(1)} hPa  (${latest.pressure.toFixed(0)} Pa)`;
+  $('wx-gust').textContent = `${latest.windGust.toFixed(1)} m/s  (${(latest.windGust * 1.94384).toFixed(1)} kn)`;
+  $('wx-hum').textContent = `${(latest.humidity * 100).toFixed(0)} %  (${latest.humidity.toFixed(2)})`;
+  $('wx-dew').textContent = `${(latest.dewPoint - 273.15).toFixed(1)} °C  (${latest.dewPoint.toFixed(2)} K)`;
   $('wx-time').textContent = latest.time.toLocaleTimeString();
 }
 
@@ -268,6 +277,7 @@ async function updateWeather() {
     const url = 'https://api.open-meteo.com/v1/forecast'
       + `?latitude=${position.lat.toFixed(4)}&longitude=${position.lon.toFixed(4)}`
       + '&current=temperature_2m,pressure_msl,wind_speed_10m,wind_direction_10m'
+      + ',wind_gusts_10m,relative_humidity_2m,dew_point_2m'
       + '&wind_speed_unit=ms';
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -299,7 +309,10 @@ function buildDelta() {
         { path: 'environment.outside.temperature', value: latest.temperature },
         { path: 'environment.outside.pressure', value: latest.pressure },
         { path: 'environment.wind.speedOverGround', value: latest.windSpeed },
-        { path: 'environment.wind.directionTrue', value: latest.windDirection }
+        { path: 'environment.wind.directionTrue', value: latest.windDirection },
+        { path: 'environment.wind.gust', value: latest.windGust },
+        { path: 'environment.outside.humidity', value: latest.humidity },
+        { path: 'environment.outside.dewPointTemperature', value: latest.dewPoint }
       ]
     }]
   };
