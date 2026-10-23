@@ -26,6 +26,9 @@
   label { display: block; flex: 1; font-size: 13px; color: var(--muted); }
   input { width: 100%; margin-top: 4px; padding: 8px; font: inherit; color: var(--text);
           background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+  button { padding: 8px 14px; font: inherit; color: #fff; background: var(--accent);
+           border: 0; border-radius: 6px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
   .status { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
   .status dt { color: var(--muted); }
   .status dd { margin: 0; }
@@ -43,6 +46,12 @@
       <label>IP address <input id="host" value="192.168.0.17" autocomplete="off"></label>
       <label style="max-width:110px">Port <input id="port" type="number" value="3000"></label>
     </div>
+  </section>
+
+  <section>
+    <h2>Authentication</h2>
+    <button id="btn-access" type="button">Request access</button>
+    <p id="auth-hint" style="margin:10px 0 0;color:var(--muted);font-size:13px"></p>
   </section>
 
   <section>
@@ -89,12 +98,115 @@ function saveConfig() {
   return cfg;
 }
 
+// ---- Authentication (Signal K "request access") ----
+
+const AUTH_KEY = 'skWeather.auth';
+const POLL_MS = 3000;
+let auth = loadAuth();   // { clientId, token, requestHref }
+let pollTimer = null;
+
+function loadAuth() {
+  let a = {};
+  try { a = JSON.parse(localStorage.getItem(AUTH_KEY)) || {}; } catch {}
+  if (!a.clientId) a.clientId = crypto.randomUUID();
+  return a;
+}
+
+function saveAuth() {
+  try { localStorage.setItem(AUTH_KEY, JSON.stringify(auth)); } catch {}
+}
+
+function baseUrl() {
+  const cfg = saveConfig();
+  return `http://${cfg.host}:${cfg.port}`;
+}
+
+function setAuthStatus(text, cls) {
+  $('st-auth').textContent = text;
+  $('st-auth').className = cls;
+}
+
+function renderAuth() {
+  if (auth.token) {
+    setAuthStatus('approved (token stored)', 'ok');
+    $('auth-hint').textContent = 'Access granted. Request again to replace the token.';
+  } else if (auth.requestHref) {
+    setAuthStatus('pending - approve in Signal K', 'warn');
+    $('auth-hint').textContent = 'Open the Signal K Admin UI > Security > Access Requests and approve with read/write permission.';
+  } else {
+    setAuthStatus('not requested', 'warn');
+    $('auth-hint').textContent = '';
+  }
+}
+
+async function requestAccess() {
+  clearTimeout(pollTimer);
+  auth.token = null;
+  try {
+    const res = await fetch(`${baseUrl()}/signalk/v1/access/requests`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientId: auth.clientId,
+        description: 'Signal K Weather (browser app)',
+        permissions: 'readwrite'
+      })
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.status === 202 || res.status === 200) {
+      auth.requestHref = body.href;
+      saveAuth();
+      log('Access request sent, waiting for approval');
+      renderAuth();
+      pollRequest();
+    } else {
+      throw new Error(`HTTP ${res.status} ${body.message || ''}`);
+    }
+  } catch (e) {
+    auth.requestHref = null;
+    saveAuth();
+    setAuthStatus('request failed', 'err');
+    $('auth-hint').textContent = `${e.message}. Check IP/port and that the server is reachable.`;
+    log(`Access request failed: ${e.message}`);
+  }
+}
+
+async function pollRequest() {
+  if (!auth.requestHref) return;
+  try {
+    const res = await fetch(`${baseUrl()}${auth.requestHref}`);
+    const body = await res.json();
+    if (body.state === 'COMPLETED') {
+      auth.requestHref = null;
+      const ar = body.accessRequest || {};
+      saveAuth();
+      if (ar.permission === 'APPROVED' && ar.token) {
+        auth.token = ar.token;
+        saveAuth();
+        log('Access approved, token stored');
+        renderAuth();
+      } else {
+        setAuthStatus('denied', 'err');
+        $('auth-hint').textContent = 'The request was denied in Signal K.';
+        log('Access denied');
+      }
+      return;
+    }
+  } catch (e) {
+    log(`Polling error: ${e.message}`);
+  }
+  pollTimer = setTimeout(pollRequest, POLL_MS);
+}
+
 function init() {
   const cfg = loadConfig();
   $('host').value = cfg.host;
   $('port').value = cfg.port;
   $('host').addEventListener('change', saveConfig);
   $('port').addEventListener('change', saveConfig);
+  $('btn-access').addEventListener('click', requestAccess);
+  renderAuth();
+  if (auth.requestHref) pollRequest();
   log(`Ready. Signal K target: ${cfg.host}:${cfg.port}`);
 }
 
