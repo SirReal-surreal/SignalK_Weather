@@ -65,6 +65,18 @@
   </section>
 
   <section>
+    <h2>Current weather</h2>
+    <dl class="status">
+      <dt>Temperature</dt><dd id="wx-temp">-</dd>
+      <dt>Wind speed</dt><dd id="wx-speed">-</dd>
+      <dt>Wind direction</dt><dd id="wx-dir">-</dd>
+      <dt>Pressure</dt><dd id="wx-press">-</dd>
+      <dt>Position</dt><dd id="wx-pos">-</dd>
+      <dt>Updated</dt><dd id="wx-time">-</dd>
+    </dl>
+  </section>
+
+  <section>
     <h2>Log</h2>
     <pre id="log"></pre>
   </section>
@@ -198,6 +210,77 @@ async function pollRequest() {
   pollTimer = setTimeout(pollRequest, POLL_MS);
 }
 
+// ---- Location and weather (Open-Meteo) ----
+
+const WEATHER_MS = 10 * 60 * 1000;
+let position = null;   // { lat, lon }
+let latest = null;     // Signal K SI values: { temperature, windSpeed, windDirection, pressure, time }
+
+function setStatus(id, text, cls) {
+  $(id).textContent = text;
+  $(id).className = cls;
+}
+
+function getPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('geolocation not supported'));
+    navigator.geolocation.getCurrentPosition(
+      p => resolve({ lat: p.coords.latitude, lon: p.coords.longitude }),
+      e => reject(new Error(e.message || 'location denied')),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
+    );
+  });
+}
+
+// Open-Meteo units: degC, hPa, m/s (requested), degrees -> Signal K SI: K, Pa, m/s, rad
+function toSignalK(c) {
+  return {
+    temperature: c.temperature_2m + 273.15,
+    windSpeed: c.wind_speed_10m,
+    windDirection: c.wind_direction_10m * Math.PI / 180,
+    pressure: c.pressure_msl * 100,
+    time: new Date()
+  };
+}
+
+function renderWeather() {
+  if (position) {
+    $('wx-pos').textContent = `${position.lat.toFixed(4)}, ${position.lon.toFixed(4)}`;
+  }
+  if (!latest) return;
+  $('wx-temp').textContent = `${(latest.temperature - 273.15).toFixed(1)} °C  (${latest.temperature.toFixed(2)} K)`;
+  $('wx-speed').textContent = `${latest.windSpeed.toFixed(1)} m/s  (${(latest.windSpeed * 1.94384).toFixed(1)} kn)`;
+  $('wx-dir').textContent = `${(latest.windDirection * 180 / Math.PI).toFixed(0)}°  (${latest.windDirection.toFixed(3)} rad)`;
+  $('wx-press').textContent = `${(latest.pressure / 100).toFixed(1)} hPa  (${latest.pressure.toFixed(0)} Pa)`;
+  $('wx-time').textContent = latest.time.toLocaleTimeString();
+}
+
+async function updateWeather() {
+  try {
+    position = await getPosition();
+    setStatus('st-loc', 'ok', 'ok');
+  } catch (e) {
+    setStatus('st-loc', position ? 'using last position' : 'unavailable', position ? 'warn' : 'err');
+    log(`Location error: ${e.message}`);
+    if (!position) return;
+  }
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast'
+      + `?latitude=${position.lat.toFixed(4)}&longitude=${position.lon.toFixed(4)}`
+      + '&current=temperature_2m,pressure_msl,wind_speed_10m,wind_direction_10m'
+      + '&wind_speed_unit=ms';
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    latest = toSignalK((await res.json()).current);
+    setStatus('st-wx', 'ok', 'ok');
+    log('Weather updated');
+  } catch (e) {
+    setStatus('st-wx', latest ? 'update failed (old data)' : 'failed', 'err');
+    log(`Weather error: ${e.message}`);
+  }
+  renderWeather();
+}
+
 function init() {
   const cfg = loadConfig();
   $('host').value = cfg.host;
@@ -207,6 +290,8 @@ function init() {
   $('btn-access').addEventListener('click', requestAccess);
   renderAuth();
   if (auth.requestHref) pollRequest();
+  updateWeather();
+  setInterval(updateWeather, WEATHER_MS);
   log(`Ready. Signal K target: ${cfg.host}:${cfg.port}`);
 }
 
