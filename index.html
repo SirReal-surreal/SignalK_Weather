@@ -281,6 +281,77 @@ async function updateWeather() {
   renderWeather();
 }
 
+// ---- Push to Signal K (WebSocket delta stream) ----
+
+const PUSH_MS = 10 * 1000;
+let ws = null;
+let wsUrl = null;
+let lastPush = null;
+
+function buildDelta() {
+  const now = new Date().toISOString();
+  return {
+    context: 'vessels.self',
+    updates: [{
+      source: { label: 'internet-weather', type: 'API' },
+      timestamp: now,
+      values: [
+        { path: 'environment.outside.temperature', value: latest.temperature },
+        { path: 'environment.outside.pressure', value: latest.pressure },
+        { path: 'environment.wind.speedOverGround', value: latest.windSpeed },
+        { path: 'environment.wind.directionTrue', value: latest.windDirection }
+      ]
+    }]
+  };
+}
+
+function connectSignalK() {
+  const cfg = saveConfig();
+  const url = `ws://${cfg.host}:${cfg.port}/signalk/v1/stream?subscribe=none&token=${encodeURIComponent(auth.token)}`;
+  if (ws && wsUrl !== url) {   // host/port/token changed
+    ws.close();
+    ws = null;
+  }
+  if (ws) return;              // already connecting or open
+  wsUrl = url;
+  setStatus('st-sk', 'connecting', 'warn');
+  const sock = new WebSocket(url);
+  ws = sock;
+  let opened = false;
+  sock.onopen = () => {
+    opened = true;
+    setStatus('st-sk', 'connected', 'ok');
+    log('Signal K connected');
+    pushWeather();
+  };
+  sock.onclose = () => {
+    if (ws === sock) ws = null;
+    if (opened) {
+      setStatus('st-sk', 'disconnected (retrying)', 'warn');
+      log('Signal K connection closed');
+    } else {
+      setStatus('st-sk', 'connection failed (retrying)', 'err');
+      log('Signal K connection failed - check IP/port and token (request access again if needed)');
+    }
+  };
+}
+
+function pushWeather() {
+  if (!latest || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(buildDelta()));
+  lastPush = new Date();
+  setStatus('st-sk', `connected, last push ${lastPush.toLocaleTimeString()}`, 'ok');
+}
+
+function pushTick() {
+  if (!auth.token) {
+    setStatus('st-sk', 'waiting for access', 'warn');
+    return;
+  }
+  connectSignalK();
+  pushWeather();
+}
+
 function init() {
   const cfg = loadConfig();
   $('host').value = cfg.host;
@@ -292,6 +363,8 @@ function init() {
   if (auth.requestHref) pollRequest();
   updateWeather();
   setInterval(updateWeather, WEATHER_MS);
+  pushTick();
+  setInterval(pushTick, PUSH_MS);
   log(`Ready. Signal K target: ${cfg.host}:${cfg.port}`);
 }
 
