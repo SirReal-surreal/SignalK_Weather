@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Signal K Weather</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #fff; --text: #1d2733; --muted: #6b7885;
+    --border: #d5dbe1; --accent: #0b6bcb; --ok: #1a7f37; --warn: #b35900; --err: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161c; --card: #1a222b; --text: #e6ebf0; --muted: #8b98a5;
+      --border: #2d3844; --accent: #4da3ff; --ok: #4cc26b; --warn: #e8a24a; --err: #ff6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 560px; margin: 0 auto; display: grid; gap: 16px; }
+  h1 { font-size: 20px; margin: 0; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+  .row { display: flex; gap: 12px; }
+  label { display: block; flex: 1; font-size: 13px; color: var(--muted); }
+  input { width: 100%; margin-top: 4px; padding: 8px; font: inherit; color: var(--text);
+          background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+  .status { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+  .status dt { color: var(--muted); }
+  .status dd { margin: 0; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  #log { margin: 0; max-height: 180px; overflow: auto; font: 12px/1.5 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Signal K Weather</h1>
+
+  <section>
+    <h2>Signal K server</h2>
+    <div class="row">
+      <label>IP address <input id="host" value="192.168.0.17" autocomplete="off"></label>
+      <label style="max-width:110px">Port <input id="port" type="number" value="3000"></label>
+    </div>
+  </section>
+
+  <section>
+    <h2>Status</h2>
+    <dl class="status">
+      <dt>Access</dt><dd id="st-auth" class="warn">not requested</dd>
+      <dt>Location</dt><dd id="st-loc" class="warn">unknown</dd>
+      <dt>Weather</dt><dd id="st-wx" class="warn">no data</dd>
+      <dt>Signal K</dt><dd id="st-sk" class="warn">disconnected</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <pre id="log"></pre>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+const STORE_KEY = 'skWeather.config';
+const DEFAULTS = { host: '192.168.0.17', port: 3000 };
+
+const $ = id => document.getElementById(id);
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  $('log').textContent = `${t}  ${msg}\n` + $('log').textContent;
+}
+
+function loadConfig() {
+  try {
+    return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(STORE_KEY)) };
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+
+function saveConfig() {
+  const cfg = { host: $('host').value.trim() || DEFAULTS.host,
+                port: Number($('port').value) || DEFAULTS.port };
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch {}
+  return cfg;
+}
+
+function init() {
+  const cfg = loadConfig();
+  $('host').value = cfg.host;
+  $('port').value = cfg.port;
+  $('host').addEventListener('change', saveConfig);
+  $('port').addEventListener('change', saveConfig);
+  log(`Ready. Signal K target: ${cfg.host}:${cfg.port}`);
+}
+
+init();
+</script>
+</body>
+</html>
